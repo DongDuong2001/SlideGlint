@@ -1,0 +1,164 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "install deps",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"install"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build after redesign",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build with autosave slides",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build with tips and features",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build presenter-notes reorder polish",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build pdf and image features",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build fix tips and images",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build drag drop images",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build clipboard paste images",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build paste hint and image fix",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build reset tips and import fix",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build reset color and image reveal",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build file-url render fix",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build presenter mode",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "build multi display presenter",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"build"
+			],
+			"isBackground": false
+		}
+	]
+}
