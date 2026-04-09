@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node", "electron"],
+    "rootDir": "./",
+    "outDir": "../dist-electron"
+  },
+  "include": ["main.ts", "preload.ts"]
+}
