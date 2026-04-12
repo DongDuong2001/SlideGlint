@@ -18,6 +18,10 @@
   "build": {
     "appId": "com.dongduong.slideglint",
     "productName": "SlideGlint",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ],
     "directories": {
       "output": "release"
     },
