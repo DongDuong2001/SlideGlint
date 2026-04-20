@@ -15,6 +15,8 @@ const DRAFT_STORAGE_KEY = 'slideglint:untitled-draft';
 const THEME_STORAGE_KEY = 'slideglint:selected-theme';
 const PASTE_HINT_SEEN_KEY = 'slideglint:paste-hint-seen';
 const PRESENTER_DISPLAY_STORAGE_KEY = 'slideglint:presenter-display-target';
+const RECENT_FILES_STORAGE_KEY = 'slideglint:recent-files';
+const MAX_RECENT_FILES = 8;
 
 type ThemeKey = 'modern-serif' | 'dark-pro' | 'rmit-blue';
 
@@ -237,6 +239,38 @@ const TITLE_SMALL_WORDS = new Set([
 const getNotesStorageKey = (filePath?: string): string =>
   filePath ? `slideglint:notes:${encodeURIComponent(filePath)}` : 'slideglint:notes:draft';
 
+const normalizeFilePath = (filePath: string): string => filePath.replace(/\\/g, '/').toLowerCase();
+
+const pushRecentFile = (current: string[], filePath: string): string[] => {
+  const trimmed = filePath.trim();
+
+  if (trimmed.length === 0) {
+    return current;
+  }
+
+  const normalized = normalizeFilePath(trimmed);
+
+  return [trimmed, ...current.filter((entry) => normalizeFilePath(entry) !== normalized)].slice(
+    0,
+    MAX_RECENT_FILES,
+  );
+};
+
+const removeRecentFile = (current: string[], filePath: string): string[] => {
+  const normalized = normalizeFilePath(filePath);
+  return current.filter((entry) => normalizeFilePath(entry) !== normalized);
+};
+
+const toRecentFileLabel = (filePath: string): string => {
+  const parts = filePath.split(/[\\/]+/).filter((part) => part.length > 0);
+
+  if (parts.length <= 3) {
+    return filePath;
+  }
+
+  return `${parts[0]}\\...\\${parts.slice(-2).join('\\')}`;
+};
+
 const splitSlides = (source: string): string[] => {
   const chunks = source
     .split(/^\s*---\s*$/gm)
@@ -432,6 +466,8 @@ function App() {
   const [presenterDisplayOptions, setPresenterDisplayOptions] =
     useState<PresenterDisplayOption[]>(defaultPresenterDisplayOptions);
   const [showTips, setShowTips] = useState<boolean>(true);
+  const [recentFiles, setRecentFiles] = useState<string[]>([]);
+  const [isRecentMenuOpen, setIsRecentMenuOpen] = useState<boolean>(false);
   const [isFocusPreview, setIsFocusPreview] = useState<boolean>(false);
   const [isEditorDragOver, setIsEditorDragOver] = useState<boolean>(false);
   const [showPasteHint, setShowPasteHint] = useState<boolean>(false);
@@ -443,6 +479,7 @@ function App() {
   const lastPersistedContentRef = useRef<string>(starterMarkdown);
   const hasSeenPasteHintRef = useRef<boolean>(false);
   const editorTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const recentMenuRef = useRef<HTMLDivElement | null>(null);
   const dragFromIndexRef = useRef<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const hasDesktopApi = typeof window !== 'undefined' && typeof window.slideglint !== 'undefined';
@@ -470,6 +507,10 @@ function App() {
       'Auto (2nd Screen)',
     [presenterDisplayOptions, presenterDisplayTarget],
   );
+  const hasUnsavedChanges = useMemo(
+    () => Boolean(activeFilePath) && markdown !== lastPersistedContentRef.current,
+    [activeFilePath, markdown],
+  );
   const currentSlideNote = slideNotes[activeSlideIndex] ?? '';
   const nextSlideTitle = slideOutline[activeSlideIndex + 1]?.title ?? 'End of deck';
   const formattedPresenterTimer = useMemo(
@@ -494,6 +535,41 @@ function App() {
     [hasDesktopApi, markdownFilePathForRender],
   );
 
+  const rememberRecentFile = useCallback(
+    (filePath: string) => {
+      setRecentFiles((currentFiles) => {
+        const nextFiles = pushRecentFile(currentFiles, filePath);
+
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(RECENT_FILES_STORAGE_KEY, JSON.stringify(nextFiles));
+        }
+
+        return nextFiles;
+      });
+    },
+    [],
+  );
+
+  const forgetRecentFile = useCallback((filePath: string) => {
+    setRecentFiles((currentFiles) => {
+      const nextFiles = removeRecentFile(currentFiles, filePath);
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(RECENT_FILES_STORAGE_KEY, JSON.stringify(nextFiles));
+      }
+
+      return nextFiles;
+    });
+  }, []);
+
+  const confirmDiscardUnsavedChanges = useCallback((): boolean => {
+    if (!hasUnsavedChanges || typeof window === 'undefined') {
+      return true;
+    }
+
+    return window.confirm('You have unsaved file changes. Continue and discard them?');
+  }, [hasUnsavedChanges]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -511,6 +587,23 @@ function App() {
 
     if (savedPresenterDisplayTarget && isPresenterDisplayTarget(savedPresenterDisplayTarget)) {
       setPresenterDisplayTarget(savedPresenterDisplayTarget);
+    }
+
+    try {
+      const recentRaw = window.localStorage.getItem(RECENT_FILES_STORAGE_KEY);
+
+      if (recentRaw) {
+        const parsed: unknown = JSON.parse(recentRaw);
+
+        if (Array.isArray(parsed)) {
+          const normalized = parsed
+            .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+            .slice(0, MAX_RECENT_FILES);
+          setRecentFiles(normalized);
+        }
+      }
+    } catch {
+      setRecentFiles([]);
     }
 
     const draft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -539,6 +632,43 @@ function App() {
       window.clearTimeout(timer);
     };
   }, [showPasteHint]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hasUnsavedChanges || isPresenterView) {
+      return;
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
+  }, [hasUnsavedChanges, isPresenterView]);
+
+  useEffect(() => {
+    if (!isRecentMenuOpen || typeof window === 'undefined') {
+      return;
+    }
+
+    const onPointerDown = (event: PointerEvent): void => {
+      const targetNode = event.target as Node | null;
+
+      if (targetNode && recentMenuRef.current && !recentMenuRef.current.contains(targetNode)) {
+        setIsRecentMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [isRecentMenuOpen]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -690,6 +820,11 @@ function App() {
       return;
     }
 
+    if (!confirmDiscardUnsavedChanges()) {
+      setStatus('Open cancelled');
+      return;
+    }
+
     const result = await window.slideglint.openMarkdownFile();
 
     if (!result) {
@@ -702,10 +837,12 @@ function App() {
     setActiveSlideIndex(0);
     setSlideNotes(readSlideNotesFromStorage(result.filePath, splitSlides(result.content).length));
     lastPersistedContentRef.current = result.content;
+    rememberRecentFile(result.filePath);
+    setIsRecentMenuOpen(false);
     window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     window.localStorage.removeItem(getNotesStorageKey(undefined));
     setStatus(`Opened ${result.filePath}`);
-  }, [hasDesktopApi]);
+  }, [confirmDiscardUnsavedChanges, hasDesktopApi, rememberRecentFile]);
 
   const saveMarkdownFile = useCallback(async () => {
     if (!hasDesktopApi) {
@@ -729,9 +866,44 @@ function App() {
 
     setActiveFilePath(result.filePath);
     lastPersistedContentRef.current = markdown;
+    rememberRecentFile(result.filePath);
+    setIsRecentMenuOpen(false);
     window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     setStatus(`Saved ${result.filePath}`);
-  }, [activeFilePath, hasDesktopApi, markdown]);
+  }, [activeFilePath, hasDesktopApi, markdown, rememberRecentFile]);
+
+  const openRecentFile = useCallback(
+    async (filePath: string) => {
+      if (!hasDesktopApi) {
+        setStatus('Recent file open is unavailable in browser mode.');
+        return;
+      }
+
+      if (!confirmDiscardUnsavedChanges()) {
+        setStatus('Open cancelled');
+        return;
+      }
+
+      try {
+        const content = await window.slideglint.readFile(filePath);
+        setMarkdown(content);
+        setRenderedMarkdown(content);
+        setActiveFilePath(filePath);
+        setActiveSlideIndex(0);
+        setSlideNotes(readSlideNotesFromStorage(filePath, splitSlides(content).length));
+        lastPersistedContentRef.current = content;
+        rememberRecentFile(filePath);
+        setIsRecentMenuOpen(false);
+        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+        window.localStorage.removeItem(getNotesStorageKey(undefined));
+        setStatus(`Opened ${filePath}`);
+      } catch {
+        forgetRecentFile(filePath);
+        setStatus(`Could not open recent file: ${filePath}`);
+      }
+    },
+    [confirmDiscardUnsavedChanges, forgetRecentFile, hasDesktopApi, rememberRecentFile],
+  );
 
   const insertTextAtCursor = useCallback((text: string, revealInsertedSlide = false) => {
     const editor = editorTextareaRef.current;
@@ -1374,6 +1546,10 @@ function App() {
         targetElement?.tagName === 'SELECT' ||
         targetElement?.isContentEditable === true;
 
+      if (key === 'escape' && isRecentMenuOpen) {
+        setIsRecentMenuOpen(false);
+      }
+
       if (event.ctrlKey || event.metaKey) {
         if (key === 's') {
           event.preventDefault();
@@ -1461,6 +1637,7 @@ function App() {
     saveMarkdownFile,
     togglePresenterWindow,
     toggleFocusPreview,
+    isRecentMenuOpen,
   ]);
 
   if (isPresenterView) {
@@ -1495,8 +1672,36 @@ function App() {
         <div>
           <h1>SlideGlint</h1>
           <p>The Developer&apos;s Presentation Engine</p>
+          {hasUnsavedChanges && <span className="dirty-indicator">Unsaved changes</span>}
         </div>
         <div className="toolbar">
+          <div className="recent-menu" ref={recentMenuRef}>
+            <button
+              type="button"
+              className="btn-recent"
+              onClick={() => setIsRecentMenuOpen((current) => !current)}
+              disabled={!hasDesktopApi || recentFiles.length === 0}
+              aria-haspopup="menu"
+            >
+              Recent
+            </button>
+            {isRecentMenuOpen && recentFiles.length > 0 && (
+              <div className="recent-popover" role="menu" aria-label="Recent files">
+                {recentFiles.map((filePath) => (
+                  <button
+                    key={filePath}
+                    type="button"
+                    className="recent-file-item"
+                    role="menuitem"
+                    title={filePath}
+                    onClick={() => void openRecentFile(filePath)}
+                  >
+                    {toRecentFileLabel(filePath)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button type="button" className="btn-presenter-window" onClick={() => void togglePresenterWindow()}>
             {isPresenterWindowOpen ? 'Close Presenter' : 'Open Presenter'}
           </button>
@@ -1735,7 +1940,7 @@ function App() {
       <footer className="statusbar">
         <span>{status}</span>
         <span>
-          {activeFilePath ?? 'Untitled.md'} · {slides.length} slides · {notesCount} notes · ~
+          {hasUnsavedChanges ? 'Unsaved' : 'Synced'} · {activeFilePath ?? 'Untitled.md'} · {slides.length} slides · {notesCount} notes · ~
           {estimatedMinutes} min talk · Auto-save {activeFilePath ? 'file' : 'draft'}
         </span>
       </footer>
