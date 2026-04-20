@@ -253,10 +253,41 @@
   color: var(--muted);
 }
 
+.dirty-indicator {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.34rem;
+  border: 1px solid #b86d1f;
+  border-radius: 999px;
+  background: #fff2df;
+  color: #7b3f00;
+  padding: 0.12rem 0.48rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.app-shell.theme-dark-pro .dirty-indicator {
+  border-color: #a7732d;
+  background: #3d2b12;
+  color: #ffdba8;
+}
+
+.app-shell.theme-rmit-blue .dirty-indicator {
+  border-color: #8f5d1a;
+  background: #fff0db;
+  color: #7b3f00;
+}
+
 .toolbar {
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.recent-menu {
+  position: relative;
 }
 
 .toolbar button {
@@ -350,6 +381,66 @@
 
 .btn-present:active {
   box-shadow: 0 1px 0 var(--present-pressed);
+}
+
+.btn-recent {
+  background: #30517a;
+  border-color: #203b5b;
+  box-shadow: 0 3px 0 #203b5b;
+}
+
+.btn-recent:active {
+  box-shadow: 0 1px 0 #203b5b;
+}
+
+.btn-recent:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.recent-popover {
+  position: absolute;
+  top: calc(100% + 0.42rem);
+  right: 0;
+  z-index: 12;
+  width: min(470px, 76vw);
+  max-height: 255px;
+  overflow-y: auto;
+  padding: 0.34rem;
+  border: 2px solid var(--line);
+  border-radius: 0.76rem;
+  background: var(--surface-soft);
+  box-shadow: 0 8px 24px rgba(16, 23, 34, 0.24);
+  display: grid;
+  gap: 0.28rem;
+}
+
+.recent-file-item {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.56rem;
+  background: color-mix(in srgb, var(--surface-soft) 75%, #ffffff);
+  color: var(--ink);
+  text-align: left;
+  padding: 0.42rem 0.58rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-file-item:hover {
+  background: color-mix(in srgb, var(--surface-soft) 62%, #e6f2ff);
+}
+
+.recent-file-item:focus-visible {
+  outline: 2px solid var(--control-focus-ring);
+  outline-offset: 1px;
 }
 
 .workspace {
@@ -950,6 +1041,21 @@
 
   .toolbar button {
     flex: 1;
+  }
+
+  .recent-menu {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .recent-menu .btn-recent {
+    width: 100%;
+  }
+
+  .recent-popover {
+    left: 0;
+    right: auto;
+    width: min(100%, 540px);
   }
 
   .workspace {
