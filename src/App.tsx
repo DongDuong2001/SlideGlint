@@ -20,6 +20,15 @@ const MAX_RECENT_FILES = 8;
 
 type ThemeKey = 'modern-serif' | 'dark-pro' | 'rmit-blue';
 
+type DeckTemplateId = 'starter' | 'blank' | 'agenda' | 'code-demo' | 'project-update';
+
+type DeckTemplate = {
+  id: DeckTemplateId;
+  label: string;
+  description: string;
+  markdown: string;
+};
+
 const presenterDisplayTargets = ['auto', 'display-1', 'display-2'] as const;
 type PresenterDisplayTarget = (typeof presenterDisplayTargets)[number];
 
@@ -54,6 +63,99 @@ const slideCoachTips: string[] = [
   'Use Polish My Slide to tighten only the current title and bullets.',
   'Insert device images with Add Image to make points visual and memorable.',
   'Paste screenshots directly with Ctrl/Cmd + V to auto-insert slide images.',
+];
+
+const deckTemplates: DeckTemplate[] = [
+  {
+    id: 'starter',
+    label: 'Starter Deck',
+    description: 'Your current SlideGlint starter story',
+    markdown: `# SlideGlint
+
+The Developer's Presentation Engine
+
+---
+
+## Live Editor MVP
+
+- Write markdown on the left.
+- See instant rendered output on the right.
+- Save files locally with Ctrl/Cmd + S.
+`,
+  },
+  {
+    id: 'blank',
+    label: 'Blank Deck',
+    description: 'Start from an empty slide outline',
+    markdown: `# New Deck
+
+---
+
+## Slide 2
+
+- Point one
+- Point two
+`,
+  },
+  {
+    id: 'agenda',
+    label: 'Agenda Deck',
+    description: 'A classic meeting or workshop outline',
+    markdown: `# Agenda
+
+- Context
+- Goals
+- Timeline
+- Decisions
+
+---
+
+## Today
+
+1. What changed
+2. Why it matters
+3. What comes next
+`,
+  },
+  {
+    id: 'code-demo',
+    label: 'Code Demo',
+    description: 'A slide structure for implementation walkthroughs',
+    markdown: `# Implementation Walkthrough
+
+- Problem
+- Approach
+- Result
+
+---
+
+## Example
+
+\`\`\`ts
+const example = 'SlideGlint';
+console.log(example);
+\`\`\`
+`,
+  },
+  {
+    id: 'project-update',
+    label: 'Project Update',
+    description: 'For weekly status, risks, and next steps',
+    markdown: `# Project Update
+
+- Done
+- In progress
+- Risks
+
+---
+
+## Next Steps
+
+- Plan
+- Build
+- Ship
+`,
+  },
 ];
 
 const NEW_SLIDE_TEMPLATE = `## New Slide
@@ -438,6 +540,10 @@ console.log(\`Ship with \${pace} feedback loops.\`);
 \`\`\`
 `;
 
+const getDeckTemplateById = (templateId: DeckTemplateId): DeckTemplate => {
+  return deckTemplates.find((template) => template.id === templateId) ?? deckTemplates[0];
+};
+
 function App() {
   const isPresenterView = useMemo(() => {
     if (typeof window === 'undefined') {
@@ -461,6 +567,7 @@ function App() {
     selectedTheme: 'modern-serif',
   });
   const [selectedTheme, setSelectedTheme] = useState<ThemeKey>('modern-serif');
+  const [selectedDeckTemplateId, setSelectedDeckTemplateId] = useState<DeckTemplateId>('starter');
   const [presenterDisplayTarget, setPresenterDisplayTarget] =
     useState<PresenterDisplayTarget>('auto');
   const [presenterDisplayOptions, setPresenterDisplayOptions] =
@@ -468,6 +575,7 @@ function App() {
   const [showTips, setShowTips] = useState<boolean>(true);
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isRecentMenuOpen, setIsRecentMenuOpen] = useState<boolean>(false);
+  const [presenterNotesQuery, setPresenterNotesQuery] = useState<string>('');
   const [isFocusPreview, setIsFocusPreview] = useState<boolean>(false);
   const [isEditorDragOver, setIsEditorDragOver] = useState<boolean>(false);
   const [showPasteHint, setShowPasteHint] = useState<boolean>(false);
@@ -507,6 +615,36 @@ function App() {
       'Auto (2nd Screen)',
     [presenterDisplayOptions, presenterDisplayTarget],
   );
+  const selectedDeckTemplate = useMemo(
+    () => getDeckTemplateById(selectedDeckTemplateId),
+    [selectedDeckTemplateId],
+  );
+  const presenterNoteMatches = useMemo(() => {
+    const query = presenterNotesQuery.trim().toLowerCase();
+
+    if (query.length === 0) {
+      return [];
+    }
+
+    return slides
+      .map((slide, index) => {
+        const note = slideNotes[index] ?? '';
+        const title = slideOutline[index]?.title ?? `Slide ${index + 1}`;
+        const haystack = `${title} ${slide} ${note}`.toLowerCase();
+
+        if (!haystack.includes(query)) {
+          return null;
+        }
+
+        return {
+          index,
+          title,
+          note,
+        };
+      })
+      .filter((entry): entry is { index: number; title: string; note: string } => entry !== null)
+      .slice(0, 8);
+  }, [presenterNotesQuery, slideNotes, slideOutline, slides]);
   const hasUnsavedChanges = useMemo(
     () => Boolean(activeFilePath) && markdown !== lastPersistedContentRef.current,
     [activeFilePath, markdown],
@@ -871,6 +1009,64 @@ function App() {
     window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     setStatus(`Saved ${result.filePath}`);
   }, [activeFilePath, hasDesktopApi, markdown, rememberRecentFile]);
+
+  const createDeckFromTemplate = useCallback(
+    (templateId: DeckTemplateId) => {
+      if (!confirmDiscardUnsavedChanges()) {
+        setStatus('New deck cancelled');
+        return;
+      }
+
+      const template = getDeckTemplateById(templateId);
+      const nextMarkdown = template.markdown.trimEnd();
+
+      setSelectedDeckTemplateId(templateId);
+      setMarkdown(nextMarkdown);
+      setRenderedMarkdown(nextMarkdown);
+      setActiveFilePath(undefined);
+      setActiveSlideIndex(0);
+      setSlideNotes(readSlideNotesFromStorage(undefined, splitSlides(nextMarkdown).length));
+      lastPersistedContentRef.current = nextMarkdown;
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, nextMarkdown);
+      window.localStorage.removeItem(getNotesStorageKey(undefined));
+      setStatus(`Started ${template.label}`);
+    },
+    [confirmDiscardUnsavedChanges],
+  );
+
+  const insertTemplateSlide = useCallback(
+    (templateId: DeckTemplateId) => {
+      const template = getDeckTemplateById(templateId);
+      const templateSlides = splitSlides(template.markdown);
+
+      if (templateSlides.length === 0) {
+        setStatus('Template has no slides');
+        return;
+      }
+
+      const sourceSlides = splitSlides(markdown);
+      const insertionIndex = Math.min(activeSlideIndex + 1, sourceSlides.length);
+      const templateSlide = templateSlides[0] ?? NEW_SLIDE_TEMPLATE;
+
+      sourceSlides.splice(insertionIndex, 0, templateSlide);
+
+      const nextMarkdown = joinSlides(sourceSlides);
+      setMarkdown(nextMarkdown);
+      setSlideNotes((currentNotes) => {
+        const nextNotes = [...currentNotes];
+        nextNotes.splice(insertionIndex, 0, '');
+        return nextNotes;
+      });
+      setActiveSlideIndex(insertionIndex);
+      setStatus(`Inserted ${template.label} slide`);
+    },
+    [activeSlideIndex, markdown],
+  );
+
+  const jumpToNotesMatch = useCallback((index: number) => {
+    setActiveSlideIndex(index);
+    setStatus(`Jumped to slide ${index + 1}`);
+  }, []);
 
   const openRecentFile = useCallback(
     async (filePath: string) => {
@@ -1714,6 +1910,9 @@ function App() {
           <button type="button" className="btn-export" onClick={() => void exportSlidesToPdf()}>
             Export PDF
           </button>
+          <button type="button" className="btn-new-deck" onClick={() => createDeckFromTemplate(selectedDeckTemplateId)}>
+            New Deck
+          </button>
           <button type="button" className="btn-open" onClick={() => void openMarkdownFile()}>
             Open
           </button>
@@ -1744,6 +1943,24 @@ function App() {
               </button>
               <button type="button" className="editor-action" onClick={duplicateCurrentSlide}>
                 Duplicate
+              </button>
+              <label htmlFor="template-select" className="template-control" title={selectedDeckTemplate.description}>
+                Template
+                <select
+                  id="template-select"
+                  className="template-select"
+                  value={selectedDeckTemplateId}
+                  onChange={(event) => setSelectedDeckTemplateId(event.target.value as DeckTemplateId)}
+                >
+                  {deckTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="editor-action" onClick={() => insertTemplateSlide(selectedDeckTemplateId)}>
+                Insert Template
               </button>
               <button type="button" className="editor-action" onClick={() => void importImageFromDevice()}>
                 Add Image
@@ -1904,6 +2121,34 @@ function App() {
               <span>Next Slide</span>
               <span>{nextSlideTitle}</span>
             </div>
+            <div className="presenter-control-line presenter-notes-search-line">
+              <label htmlFor="presenter-notes-search" className="presenter-display-label">
+                Jump to Notes
+              </label>
+              <input
+                id="presenter-notes-search"
+                className="presenter-notes-search"
+                type="search"
+                value={presenterNotesQuery}
+                onChange={(event) => setPresenterNotesQuery(event.target.value)}
+                placeholder="Search slides, titles, or notes"
+              />
+            </div>
+            {presenterNoteMatches.length > 0 && (
+              <div className="presenter-notes-results" aria-label="Matching slides">
+                {presenterNoteMatches.map((entry) => (
+                  <button
+                    key={`${entry.index}-${entry.title}`}
+                    type="button"
+                    className={`presenter-note-match${entry.index === activeSlideIndex ? ' active' : ''}`}
+                    onClick={() => jumpToNotesMatch(entry.index)}
+                  >
+                    <span>{entry.title}</span>
+                    <small>Slide {entry.index + 1}</small>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
           <section className="notes-panel" aria-label="Presenter notes">
             <div className="notes-header">
