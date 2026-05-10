@@ -359,6 +359,16 @@
   box-shadow: 0 1px 0 var(--export-pressed);
 }
 
+.btn-new-deck {
+  background: var(--accent);
+  border-color: var(--accent-pressed);
+  box-shadow: 0 3px 0 var(--accent-pressed);
+}
+
+.btn-new-deck:active {
+  box-shadow: 0 1px 0 var(--accent-pressed);
+}
+
 .btn-reset {
   background: var(--reset-bg);
   border-color: var(--reset-border);
@@ -589,6 +599,41 @@
 .theme-select:focus-visible {
   outline: 2px solid var(--control-focus-ring);
   outline-offset: 1px;
+}
+
+.template-control {
+  display: grid;
+  gap: 0.22rem;
+  align-items: center;
+  color: #b8c9e9;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.template-select {
+  min-width: 8.5rem;
+  border: 1px solid var(--select-border);
+  border-radius: 0.45rem;
+  padding: 0.3rem 0.44rem;
+  background: var(--select-bg);
+  color: var(--select-ink);
+  font-size: 0.77rem;
+}
+
+.template-select:focus-visible {
+  outline: 2px solid var(--control-focus-ring);
+  outline-offset: 1px;
+}
+
+.template-description {
+  max-width: 12rem;
+  color: #91a8d4;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
 .slide-coach {
@@ -890,6 +935,71 @@
 }
 
 .presenter-display-select:focus-visible {
+  outline: 2px solid var(--control-focus-ring);
+  outline-offset: 1px;
+}
+
+.presenter-notes-search-line {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.presenter-notes-search {
+  width: min(100%, 280px);
+  border: 1px solid var(--select-border);
+  border-radius: 0.45rem;
+  padding: 0.32rem 0.48rem;
+  background: var(--select-bg);
+  color: var(--select-ink);
+  font-size: 0.77rem;
+}
+
+.presenter-notes-search:focus-visible {
+  outline: 2px solid var(--control-focus-ring);
+  outline-offset: 1px;
+}
+
+.presenter-notes-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.presenter-note-match {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 7.5rem;
+  padding: 0.42rem 0.52rem;
+  border: 1px solid var(--notes-line);
+  border-radius: 0.52rem;
+  background: rgba(255, 255, 255, 0.4);
+  color: var(--notes-ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.presenter-note-match span,
+.presenter-note-match small {
+  display: block;
+}
+
+.presenter-note-match span {
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.presenter-note-match small {
+  color: var(--notes-ink);
+  opacity: 0.72;
+  font-size: 0.67rem;
+}
+
+.presenter-note-match.active {
+  border-color: var(--control-focus-ring);
+  box-shadow: 0 0 0 1px var(--control-focus-ring) inset;
+}
+
+.presenter-note-match:focus-visible {
   outline: 2px solid var(--control-focus-ring);
   outline-offset: 1px;
 }
