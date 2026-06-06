@@ -12,5 +12,5 @@
     "rootDir": "./",
     "outDir": "../dist-electron"
   },
-  "include": ["main.ts", "preload.ts"]
+  "include": ["*.ts"]
 }
