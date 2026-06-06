@@ -1,62 +1,75 @@
 # SlideGlint
 
-The Developer's Presentation Engine.
+SlideGlint is a desktop presentation editor for building slide decks in Markdown.
+
+## Features
+
+- Markdown slide editor with a live rendered preview
+- Slides separated by `---`
+- Starter, blank, agenda, code demo, and project update templates
+- Modern Serif, Dark Pro, and RMIT Blue themes
+- Slide outline with drag-and-drop reordering
+- Slide coach tips and current-slide copy polishing
+- Local image import, drag and drop, and clipboard paste
+- Presenter window with speaker notes, timer, and display selection
+- PDF export
+- Recent files and draft recovery
+- Focused preview mode
+- Keyboard shortcuts for open, save, navigation, and editing
 
 ## Stack
 
-- Electron main process (TypeScript)
-- React renderer with Vite (TypeScript)
-- react-markdown for markdown rendering
+- Electron main and preload processes in TypeScript
+- React 19 renderer with Vite
+- `react-markdown` for slide rendering
 
-## What is included
+## Development
 
-- Vite + React + TypeScript renderer scaffold
-- Electron main and preload processes
-- IPC bridge for local file operations:
-  - open markdown with native file picker
-  - read file
-  - save file (supports save-as flow)
-- Two-pane layout:
-  - left side markdown textarea
-  - right side live markdown preview (100ms debounce)
-- Keyboard shortcuts:
-  - Ctrl/Cmd + O: open file
-  - Ctrl/Cmd + S: save file
+Install dependencies and start the renderer plus Electron:
 
-## Run locally
+```bash
+npm install
+npm run dev
+```
 
-1. Install dependencies:
+The renderer is also usable in browser mode, but desktop file, image, presenter, and PDF APIs
+require Electron.
 
-   npm install
+## Quality Checks
 
-2. Start app in development mode:
+```bash
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
 
-   npm run dev
+Run the complete local CI sequence with:
 
-This starts Vite for the renderer and launches Electron once the renderer is ready.
+```bash
+npm run ci
+```
 
-## Build
+Use `npm run format` to apply Prettier formatting.
 
-1. Create production bundles:
+## Build And Package
 
-   npm run build
+Create production bundles:
 
-2. Launch Electron from compiled output:
+```bash
+npm run build
+```
 
-   npm run start
+Build a Windows x64 installer:
 
-## Package Windows EXE
+```bash
+npm run package:win
+```
 
-1. Build and package a Windows installer:
+Installer output is written to `release/`.
 
-   npm run package:win
+## Release Automation
 
-2. Output files are written to the `release/` folder.
-
-## GitHub Release Automation
-
-- Workflow file: `.github/workflows/windows-exe-release.yml`
-- Trigger: every push and every tag push.
-- Behavior:
-  - Branch pushes create an auto-tagged prerelease and upload the generated `.exe`.
-  - Tag pushes publish a release for that tag with the generated `.exe`.
+- `.github/workflows/ci.yml` runs checks on pushes and pull requests.
+- `.github/workflows/windows-exe-release.yml` builds and publishes the Windows installer for
+  `v*` tags or an explicit manual dispatch.
