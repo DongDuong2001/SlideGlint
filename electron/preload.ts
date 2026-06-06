@@ -81,7 +81,8 @@ const slideglintApi = {
     ipcRenderer.invoke('assets:importImageFromPath', payload),
   importImageFromClipboard: (
     payload: ImportImageFromClipboardPayload,
-  ): Promise<ImportImageResult | null> => ipcRenderer.invoke('assets:importImageFromClipboard', payload),
+  ): Promise<ImportImageResult | null> =>
+    ipcRenderer.invoke('assets:importImageFromClipboard', payload),
   readImageDataUrl: (payload: ReadImageDataUrlPayload): Promise<string | null> =>
     ipcRenderer.invoke('assets:readImageDataUrl', payload),
   exportPdf: (payload: ExportPdfPayload): Promise<ExportPdfResult | null> =>
