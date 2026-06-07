@@ -1,7 +1,23 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, type Display, type IpcMainInvokeEvent } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  screen,
+  type Display,
+  type IpcMainInvokeEvent,
+} from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  isPathInside,
+  isSupportedImagePath,
+  MAX_IMAGE_FILE_BYTES,
+  requireClipboardImageBytes,
+  requireImageFilePath,
+  requireMarkdownFilePath,
+} from './ipcValidation.js';
 
 type SavePayload = {
   filePath?: string;
@@ -264,6 +280,22 @@ const extensionFromMimeType = (mimeType?: string): string => {
   return mimeTypeToExtension[mimeType.toLowerCase()] ?? '.png';
 };
 
+const requireOptionalMarkdownFilePath = (filePath?: string): string | undefined => {
+  if (typeof filePath === 'undefined') {
+    return undefined;
+  }
+
+  return requireMarkdownFilePath(filePath, 'markdownFilePath');
+};
+
+const requireContent = (content: unknown): string => {
+  if (typeof content !== 'string') {
+    throw new Error('content must be a string.');
+  }
+
+  return content;
+};
+
 const resolveLocalImagePath = (src: string, markdownFilePath?: string): string | null => {
   const trimmed = src.trim();
 
@@ -293,14 +325,45 @@ const resolveLocalImagePath = (src: string, markdownFilePath?: string): string |
 const toImageDataUrl = async (src: string, markdownFilePath?: string): Promise<string | null> => {
   const localImagePath = resolveLocalImagePath(src, markdownFilePath);
 
-  if (!localImagePath) {
+  if (!localImagePath || !isSupportedImagePath(localImagePath)) {
     return null;
   }
 
   try {
-    const ext = path.extname(localImagePath).toLowerCase();
+    const realImagePath = await fs.realpath(localImagePath);
+    const allowedRoots = [path.join(app.getPath('userData'), 'draft-assets')];
+
+    if (markdownFilePath) {
+      allowedRoots.push(
+        path.dirname(requireMarkdownFilePath(markdownFilePath, 'markdownFilePath')),
+      );
+    }
+
+    const isAllowed = (
+      await Promise.all(
+        allowedRoots.map(async (rootPath) => {
+          try {
+            return isPathInside(await fs.realpath(rootPath), realImagePath);
+          } catch {
+            return false;
+          }
+        }),
+      )
+    ).some(Boolean);
+
+    if (!isAllowed) {
+      return null;
+    }
+
+    const imageStat = await fs.stat(realImagePath);
+
+    if (!imageStat.isFile() || imageStat.size > MAX_IMAGE_FILE_BYTES) {
+      return null;
+    }
+
+    const ext = path.extname(realImagePath).toLowerCase();
     const mimeType = imageMimeTypes[ext] ?? 'application/octet-stream';
-    const buffer = await fs.readFile(localImagePath);
+    const buffer = await fs.readFile(realImagePath);
     return `data:${mimeType};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
@@ -311,19 +374,29 @@ const copyImportedImage = async (
   sourcePath: string,
   markdownFilePath?: string,
 ): Promise<ImportImageResult> => {
-  const sourceParts = path.parse(sourcePath);
-  const baseName = sanitizeBaseName(sourceParts.name);
-  const ext = sourceParts.ext || '.png';
+  const validatedSourcePath = requireImageFilePath(sourcePath);
+  const validatedMarkdownFilePath = requireOptionalMarkdownFilePath(markdownFilePath);
+  const sourceStat = await fs.stat(validatedSourcePath);
 
-  if (markdownFilePath) {
+  if (!sourceStat.isFile() || sourceStat.size > MAX_IMAGE_FILE_BYTES) {
+    throw new Error('Image must be a file no larger than 25 MB.');
+  }
+
+  const sourceParts = path.parse(validatedSourcePath);
+  const baseName = sanitizeBaseName(sourceParts.name);
+  const ext = sourceParts.ext.toLowerCase();
+
+  if (validatedMarkdownFilePath) {
     try {
-      const deckDirectory = path.dirname(markdownFilePath);
+      const deckDirectory = path.dirname(validatedMarkdownFilePath);
       const assetsDirectory = path.join(deckDirectory, 'assets');
 
       await fs.mkdir(assetsDirectory, { recursive: true });
 
-      const destinationPath = await ensureUniqueFilePath(path.join(assetsDirectory, `${baseName}${ext}`));
-      await fs.copyFile(sourcePath, destinationPath);
+      const destinationPath = await ensureUniqueFilePath(
+        path.join(assetsDirectory, `${baseName}${ext}`),
+      );
+      await fs.copyFile(validatedSourcePath, destinationPath);
 
       return {
         markdownPath: path.posix.join('assets', path.basename(destinationPath)),
@@ -339,8 +412,10 @@ const copyImportedImage = async (
   const draftAssetsDirectory = path.join(app.getPath('userData'), 'draft-assets');
   await fs.mkdir(draftAssetsDirectory, { recursive: true });
 
-  const destinationPath = await ensureUniqueFilePath(path.join(draftAssetsDirectory, `${baseName}${ext}`));
-  await fs.copyFile(sourcePath, destinationPath);
+  const destinationPath = await ensureUniqueFilePath(
+    path.join(draftAssetsDirectory, `${baseName}${ext}`),
+  );
+  await fs.copyFile(validatedSourcePath, destinationPath);
 
   return {
     markdownPath: pathToFileURL(destinationPath).toString(),
@@ -361,6 +436,7 @@ const createMainWindow = async (): Promise<void> => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -407,6 +483,7 @@ const createPresenterWindow = async (): Promise<void> => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 
@@ -457,15 +534,17 @@ const registerIpcHandlers = (): void => {
   ipcMain.removeAllListeners('presenter:command');
 
   ipcMain.handle('fs:readFile', async (_event: IpcMainInvokeEvent, filePath: string) => {
-    return fs.readFile(filePath, 'utf-8');
+    return fs.readFile(requireMarkdownFilePath(filePath), 'utf-8');
   });
 
   ipcMain.handle('fs:writeFile', async (_event: IpcMainInvokeEvent, payload: SavePayload) => {
-    if (!payload.filePath) {
+    if (!payload || !payload.filePath) {
       throw new Error('A file path is required for fs:writeFile.');
     }
 
-    await fs.writeFile(payload.filePath, payload.content, 'utf-8');
+    const filePath = requireMarkdownFilePath(payload.filePath);
+    const content = requireContent(payload.content);
+    await fs.writeFile(filePath, content, 'utf-8');
     return true;
   });
 
@@ -484,7 +563,7 @@ const registerIpcHandlers = (): void => {
       return null;
     }
 
-    const filePath = result.filePaths[0];
+    const filePath = requireMarkdownFilePath(result.filePaths[0]);
     const content = await fs.readFile(filePath, 'utf-8');
 
     return {
@@ -493,56 +572,67 @@ const registerIpcHandlers = (): void => {
     };
   });
 
-  ipcMain.handle('dialog:saveMarkdown', async (_event: IpcMainInvokeEvent, payload: SavePayload) => {
-    if (!mainWindow) {
-      return null;
-    }
-
-    let targetPath = payload.filePath;
-
-    if (!targetPath) {
-      const result = await dialog.showSaveDialog(mainWindow, {
-        title: 'Save Markdown File',
-        defaultPath: 'slides.md',
-        filters: [{ name: 'Markdown', extensions: ['md'] }],
-      });
-
-      if (result.canceled || !result.filePath) {
+  ipcMain.handle(
+    'dialog:saveMarkdown',
+    async (_event: IpcMainInvokeEvent, payload: SavePayload) => {
+      if (!mainWindow) {
         return null;
       }
 
-      targetPath = result.filePath;
-    }
+      const content = requireContent(payload?.content);
+      let targetPath = requireOptionalMarkdownFilePath(payload?.filePath);
 
-    await fs.writeFile(targetPath, payload.content, 'utf-8');
+      if (!targetPath) {
+        const result = await dialog.showSaveDialog(mainWindow, {
+          title: 'Save Markdown File',
+          defaultPath: 'slides.md',
+          filters: [{ name: 'Markdown', extensions: ['md'] }],
+        });
 
-    return {
-      filePath: targetPath,
-    };
-  });
+        if (result.canceled || !result.filePath) {
+          return null;
+        }
 
-  ipcMain.handle('assets:importImage', async (_event: IpcMainInvokeEvent, payload?: ImportImagePayload) => {
-    if (!mainWindow) {
-      return null;
-    }
+        targetPath = result.filePath;
+      }
 
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Insert Image Into Slide',
-      properties: ['openFile'],
-      filters: [
-        {
-          name: 'Images',
-          extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'],
-        },
-      ],
-    });
+      targetPath = requireMarkdownFilePath(targetPath);
+      await fs.writeFile(targetPath, content, 'utf-8');
 
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
+      return {
+        filePath: targetPath,
+      };
+    },
+  );
 
-    return copyImportedImage(result.filePaths[0], payload?.markdownFilePath);
-  });
+  ipcMain.handle(
+    'assets:importImage',
+    async (_event: IpcMainInvokeEvent, payload?: ImportImagePayload) => {
+      if (!mainWindow) {
+        return null;
+      }
+
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Insert Image Into Slide',
+        properties: ['openFile'],
+        filters: [
+          {
+            name: 'Images',
+            extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'],
+          },
+        ],
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null;
+      }
+
+      return copyImportedImage(
+        requireImageFilePath(result.filePaths[0]),
+        requireOptionalMarkdownFilePath(payload?.markdownFilePath),
+      );
+    },
+  );
 
   ipcMain.handle(
     'assets:importImageFromPath',
@@ -551,30 +641,39 @@ const registerIpcHandlers = (): void => {
         return null;
       }
 
-      return copyImportedImage(payload.sourcePath, payload.markdownFilePath);
+      return copyImportedImage(
+        requireImageFilePath(payload.sourcePath),
+        requireOptionalMarkdownFilePath(payload.markdownFilePath),
+      );
     },
   );
 
   ipcMain.handle(
     'assets:importImageFromClipboard',
     async (_event: IpcMainInvokeEvent, payload: ImportImageFromClipboardPayload) => {
-      if (!payload || !Array.isArray(payload.bytes) || payload.bytes.length === 0) {
+      if (!payload) {
         return null;
       }
 
+      const bytes = requireClipboardImageBytes(payload.bytes);
+      const markdownFilePath = requireOptionalMarkdownFilePath(payload.markdownFilePath);
       const suggestedName = payload.suggestedName?.trim() || `pasted-image-${Date.now()}`;
       const parsedName = path.parse(suggestedName);
       const baseName = sanitizeBaseName(parsedName.name || 'pasted-image');
-      const ext = parsedName.ext || extensionFromMimeType(payload.mimeType);
+      const ext = (parsedName.ext || extensionFromMimeType(payload.mimeType)).toLowerCase();
 
-      if (payload.markdownFilePath) {
-        const deckDirectory = path.dirname(payload.markdownFilePath);
+      requireImageFilePath(`${baseName}${ext}`, 'suggestedName');
+
+      if (markdownFilePath) {
+        const deckDirectory = path.dirname(markdownFilePath);
         const assetsDirectory = path.join(deckDirectory, 'assets');
 
         await fs.mkdir(assetsDirectory, { recursive: true });
 
-        const destinationPath = await ensureUniqueFilePath(path.join(assetsDirectory, `${baseName}${ext}`));
-        await fs.writeFile(destinationPath, Buffer.from(payload.bytes));
+        const destinationPath = await ensureUniqueFilePath(
+          path.join(assetsDirectory, `${baseName}${ext}`),
+        );
+        await fs.writeFile(destinationPath, Buffer.from(bytes));
 
         return {
           markdownPath: path.posix.join('assets', path.basename(destinationPath)),
@@ -587,8 +686,10 @@ const registerIpcHandlers = (): void => {
       const draftAssetsDirectory = path.join(app.getPath('userData'), 'draft-assets');
       await fs.mkdir(draftAssetsDirectory, { recursive: true });
 
-      const destinationPath = await ensureUniqueFilePath(path.join(draftAssetsDirectory, `${baseName}${ext}`));
-      await fs.writeFile(destinationPath, Buffer.from(payload.bytes));
+      const destinationPath = await ensureUniqueFilePath(
+        path.join(draftAssetsDirectory, `${baseName}${ext}`),
+      );
+      await fs.writeFile(destinationPath, Buffer.from(bytes));
 
       return {
         markdownPath: pathToFileURL(destinationPath).toString(),
@@ -602,7 +703,11 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(
     'assets:readImageDataUrl',
     async (_event: IpcMainInvokeEvent, payload: ReadImageDataUrlPayload) => {
-      return toImageDataUrl(payload.src, payload.markdownFilePath);
+      if (!payload || typeof payload.src !== 'string') {
+        return null;
+      }
+
+      return toImageDataUrl(payload.src, requireOptionalMarkdownFilePath(payload.markdownFilePath));
     },
   );
 
@@ -655,28 +760,34 @@ const registerIpcHandlers = (): void => {
     return presenterState;
   });
 
-  ipcMain.handle('presenter:updateState', async (_event: IpcMainInvokeEvent, nextState: PresenterStatePayload) => {
-    presenterState = normalizePresenterState(nextState);
-    sendPresenterStateToAudience();
-    return true;
-  });
+  ipcMain.handle(
+    'presenter:updateState',
+    async (_event: IpcMainInvokeEvent, nextState: PresenterStatePayload) => {
+      presenterState = normalizePresenterState(nextState);
+      sendPresenterStateToAudience();
+      return true;
+    },
+  );
 
-  ipcMain.handle('presenter:setDisplayTarget', async (_event: IpcMainInvokeEvent, target: PresenterDisplayTarget) => {
-    if (target === 'display-1' || target === 'display-2') {
-      presenterDisplayTarget = target;
-    } else {
-      presenterDisplayTarget = 'auto';
-    }
+  ipcMain.handle(
+    'presenter:setDisplayTarget',
+    async (_event: IpcMainInvokeEvent, target: PresenterDisplayTarget) => {
+      if (target === 'display-1' || target === 'display-2') {
+        presenterDisplayTarget = target;
+      } else {
+        presenterDisplayTarget = 'auto';
+      }
 
-    if (presenterWindow && !presenterWindow.isDestroyed()) {
-      const targetDisplay = getPresenterTargetDisplay();
-      placeWindowOnDisplay(presenterWindow, targetDisplay);
-      presenterWindow.maximize();
-      presenterWindow.focus();
-    }
+      if (presenterWindow && !presenterWindow.isDestroyed()) {
+        const targetDisplay = getPresenterTargetDisplay();
+        placeWindowOnDisplay(presenterWindow, targetDisplay);
+        presenterWindow.maximize();
+        presenterWindow.focus();
+      }
 
-    return presenterDisplayTarget;
-  });
+      return presenterDisplayTarget;
+    },
+  );
 
   ipcMain.handle('presenter:getDisplayOptions', async () => {
     return getPresenterDisplayOptions();

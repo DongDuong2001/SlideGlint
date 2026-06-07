@@ -1,0 +1,6 @@
+dist
+dist-electron
+node_modules
+release
+.vscode
+package-lock.json

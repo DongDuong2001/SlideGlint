@@ -9,25 +9,37 @@ import {
   type DragEvent,
 } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
+import { polishCurrentSlideContent } from './lib/polish';
+import {
+  MAX_RECENT_FILES,
+  pushRecentFile,
+  removeRecentFile,
+  toRecentFileLabel,
+} from './lib/recentFiles';
+import { getNotesStorageKey, readSlideNotesFromStorage } from './lib/slideNotes';
+import {
+  countWords,
+  extractSlideTitle,
+  getSuggestedPdfFileName,
+  joinSlides,
+  splitSlides,
+} from './lib/slides';
+import {
+  DRAFT_STORAGE_KEY,
+  PASTE_HINT_SEEN_KEY,
+  PRESENTER_DISPLAY_STORAGE_KEY,
+  RECENT_FILES_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+} from './lib/storageKeys';
+import {
+  deckTemplates,
+  getDeckTemplateById,
+  NEW_SLIDE_TEMPLATE,
+  themes,
+  type DeckTemplateId,
+  type ThemeKey,
+} from './templates/deckTemplates';
 import './App.css';
-
-const DRAFT_STORAGE_KEY = 'slideglint:untitled-draft';
-const THEME_STORAGE_KEY = 'slideglint:selected-theme';
-const PASTE_HINT_SEEN_KEY = 'slideglint:paste-hint-seen';
-const PRESENTER_DISPLAY_STORAGE_KEY = 'slideglint:presenter-display-target';
-const RECENT_FILES_STORAGE_KEY = 'slideglint:recent-files';
-const MAX_RECENT_FILES = 8;
-
-type ThemeKey = 'modern-serif' | 'dark-pro' | 'rmit-blue';
-
-type DeckTemplateId = 'starter' | 'blank' | 'agenda' | 'code-demo' | 'project-update';
-
-type DeckTemplate = {
-  id: DeckTemplateId;
-  label: string;
-  description: string;
-  markdown: string;
-};
 
 const presenterDisplayTargets = ['auto', 'display-1', 'display-2'] as const;
 type PresenterDisplayTarget = (typeof presenterDisplayTargets)[number];
@@ -47,12 +59,6 @@ const isPresenterDisplayTarget = (value: string): value is PresenterDisplayTarge
   return presenterDisplayTargets.includes(value as PresenterDisplayTarget);
 };
 
-const themes: Array<{ key: ThemeKey; label: string }> = [
-  { key: 'modern-serif', label: 'Modern Serif' },
-  { key: 'dark-pro', label: 'Dark Pro' },
-  { key: 'rmit-blue', label: 'RMIT Blue' },
-];
-
 const slideCoachTips: string[] = [
   'Start each slide with a conclusion title, not a vague topic.',
   'Keep one idea per slide and use no more than three bullets.',
@@ -65,116 +71,10 @@ const slideCoachTips: string[] = [
   'Paste screenshots directly with Ctrl/Cmd + V to auto-insert slide images.',
 ];
 
-const deckTemplates: DeckTemplate[] = [
-  {
-    id: 'starter',
-    label: 'Starter Deck',
-    description: 'Your current SlideGlint starter story',
-    markdown: `# SlideGlint
-
-The Developer's Presentation Engine
-
----
-
-## Live Editor MVP
-
-- Write markdown on the left.
-- See instant rendered output on the right.
-- Save files locally with Ctrl/Cmd + S.
-`,
-  },
-  {
-    id: 'blank',
-    label: 'Blank Deck',
-    description: 'Start from an empty slide outline',
-    markdown: `# New Deck
-
----
-
-## Slide 2
-
-- Point one
-- Point two
-`,
-  },
-  {
-    id: 'agenda',
-    label: 'Agenda Deck',
-    description: 'A classic meeting or workshop outline',
-    markdown: `# Agenda
-
-- Context
-- Goals
-- Timeline
-- Decisions
-
----
-
-## Today
-
-1. What changed
-2. Why it matters
-3. What comes next
-`,
-  },
-  {
-    id: 'code-demo',
-    label: 'Code Demo',
-    description: 'A slide structure for implementation walkthroughs',
-    markdown: `# Implementation Walkthrough
-
-- Problem
-- Approach
-- Result
-
----
-
-## Example
-
-\`\`\`ts
-const example = 'SlideGlint';
-console.log(example);
-\`\`\`
-`,
-  },
-  {
-    id: 'project-update',
-    label: 'Project Update',
-    description: 'For weekly status, risks, and next steps',
-    markdown: `# Project Update
-
-- Done
-- In progress
-- Risks
-
----
-
-## Next Steps
-
-- Plan
-- Build
-- Ship
-`,
-  },
-];
-
-const NEW_SLIDE_TEMPLATE = `## New Slide
-
-- Core message
-- Evidence
-- Next action`;
-
-const getSuggestedPdfFileName = (filePath?: string): string => {
-  if (!filePath) {
-    return 'slideglint-deck.pdf';
-  }
-
-  const fileName = filePath.split(/[\\/]/).pop() ?? 'slides.md';
-  const baseName = fileName.replace(/\.[^.]+$/, '').trim();
-  return `${baseName.length > 0 ? baseName : 'slides'}.pdf`;
-};
-
-const resolveMarkdownImageSource = (src: string | undefined, markdownFilePath?: string): string | undefined => {
+const resolveMarkdownImageSource = (
+  src: string | undefined,
+  markdownFilePath?: string,
+): string | undefined => {
   void markdownFilePath;
 
   if (!src) {
@@ -320,208 +220,6 @@ const LocalMarkdownImage = ({
   return <img {...props} src={resolvedSrc} alt={alt ?? 'Slide image'} loading="lazy" />;
 };
 
-const TITLE_SMALL_WORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'as',
-  'at',
-  'by',
-  'for',
-  'in',
-  'of',
-  'on',
-  'or',
-  'the',
-  'to',
-  'via',
-  'vs',
-]);
-
-const getNotesStorageKey = (filePath?: string): string =>
-  filePath ? `slideglint:notes:${encodeURIComponent(filePath)}` : 'slideglint:notes:draft';
-
-const normalizeFilePath = (filePath: string): string => filePath.replace(/\\/g, '/').toLowerCase();
-
-const pushRecentFile = (current: string[], filePath: string): string[] => {
-  const trimmed = filePath.trim();
-
-  if (trimmed.length === 0) {
-    return current;
-  }
-
-  const normalized = normalizeFilePath(trimmed);
-
-  return [trimmed, ...current.filter((entry) => normalizeFilePath(entry) !== normalized)].slice(
-    0,
-    MAX_RECENT_FILES,
-  );
-};
-
-const removeRecentFile = (current: string[], filePath: string): string[] => {
-  const normalized = normalizeFilePath(filePath);
-  return current.filter((entry) => normalizeFilePath(entry) !== normalized);
-};
-
-const toRecentFileLabel = (filePath: string): string => {
-  const parts = filePath.split(/[\\/]+/).filter((part) => part.length > 0);
-
-  if (parts.length <= 3) {
-    return filePath;
-  }
-
-  return `${parts[0]}\\...\\${parts.slice(-2).join('\\')}`;
-};
-
-const splitSlides = (source: string): string[] => {
-  const chunks = source
-    .split(/^\s*---\s*$/gm)
-    .map((chunk) => chunk.trim())
-    .filter((chunk) => chunk.length > 0);
-
-  return chunks.length > 0 ? chunks : [''];
-};
-
-const joinSlides = (slides: string[]): string => slides.join('\n\n---\n\n');
-
-const countWords = (source: string): number => source.match(/[A-Za-z0-9_'-]+/g)?.length ?? 0;
-
-const readSlideNotesFromStorage = (filePath: string | undefined, slideCount: number): string[] => {
-  if (typeof window === 'undefined') {
-    return Array.from({ length: slideCount }, () => '');
-  }
-
-  try {
-    const raw = window.localStorage.getItem(getNotesStorageKey(filePath));
-
-    if (!raw) {
-      return Array.from({ length: slideCount }, () => '');
-    }
-
-    const parsed: unknown = JSON.parse(raw);
-
-    if (!Array.isArray(parsed)) {
-      return Array.from({ length: slideCount }, () => '');
-    }
-
-    return Array.from({ length: slideCount }, (_, index) => {
-      const note = parsed[index];
-      return typeof note === 'string' ? note : '';
-    });
-  } catch {
-    return Array.from({ length: slideCount }, () => '');
-  }
-};
-
-const extractSlideTitle = (slide: string, index: number): string => {
-  const heading = slide.match(/^\s{0,3}#{1,6}\s+(.+)$/m)?.[1]?.trim();
-
-  if (heading) {
-    return heading;
-  }
-
-  const firstContentLine = slide
-    .split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  if (!firstContentLine) {
-    return `Slide ${index + 1}`;
-  }
-
-  return firstContentLine.slice(0, 48);
-};
-
-const toTitleCase = (source: string): string => {
-  const words = source
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .filter((word) => word.length > 0);
-
-  return words
-    .map((word, index) => {
-      if (index > 0 && TITLE_SMALL_WORDS.has(word)) {
-        return word;
-      }
-
-      return `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
-    })
-    .join(' ');
-};
-
-const polishTitle = (title: string): string => {
-  let cleaned = title
-    .replace(/^\s*(overview|intro(?:duction)?|summary|agenda|notes?)\s*:?\s*/i, '')
-    .replace(/[.!?\s]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  if (cleaned.length === 0) {
-    cleaned = 'Key Takeaway';
-  }
-
-  return toTitleCase(cleaned);
-};
-
-const polishBullet = (bullet: string): string => {
-  const withoutFiller = bullet
-    .replace(/^\s*(we\s+will|we\s+can|you\s+can|let'?s|i\s+will)\s+/i, '')
-    .replace(/\b(really|very|just|basically|simply|actually|kind\s+of|sort\s+of)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[;,.!?\s]+$/g, '')
-    .trim();
-
-  if (withoutFiller.length === 0) {
-    return 'Clarify the key point';
-  }
-
-  return `${withoutFiller.charAt(0).toUpperCase()}${withoutFiller.slice(1)}`;
-};
-
-const polishCurrentSlideContent = (slide: string): { nextSlide: string; didChange: boolean } => {
-  const lines = slide.split('\n');
-  let changed = false;
-  let headingHandled = false;
-
-  const nextLines = lines.map((line) => {
-    const headingMatch = line.match(/^(\s{0,3}#{1,6}\s+)(.+)$/);
-
-    if (headingMatch && !headingHandled) {
-      headingHandled = true;
-      const [, prefix, headingText] = headingMatch;
-      const polishedHeading = polishTitle(headingText);
-
-      if (polishedHeading !== headingText.trim()) {
-        changed = true;
-      }
-
-      return `${prefix}${polishedHeading}`;
-    }
-
-    const bulletMatch = line.match(/^(\s*(?:[-*+]|\d+\.)\s+)(.+)$/);
-
-    if (!bulletMatch) {
-      return line;
-    }
-
-    const [, prefix, bulletText] = bulletMatch;
-    const polishedBullet = polishBullet(bulletText);
-
-    if (polishedBullet !== bulletText.trim()) {
-      changed = true;
-    }
-
-    return `${prefix}${polishedBullet}`;
-  });
-
-  return {
-    nextSlide: nextLines.join('\n'),
-    didChange: changed,
-  };
-};
-
 const starterMarkdown = `# SlideGlint
 
 The Developer's Presentation Engine
@@ -539,10 +237,6 @@ const pace = 'fast';
 console.log(\`Ship with \${pace} feedback loops.\`);
 \`\`\`
 `;
-
-const getDeckTemplateById = (templateId: DeckTemplateId): DeckTemplate => {
-  return deckTemplates.find((template) => template.id === templateId) ?? deckTemplates[0];
-};
 
 function App() {
   const isPresenterView = useMemo(() => {
@@ -570,8 +264,9 @@ function App() {
   const [selectedDeckTemplateId, setSelectedDeckTemplateId] = useState<DeckTemplateId>('starter');
   const [presenterDisplayTarget, setPresenterDisplayTarget] =
     useState<PresenterDisplayTarget>('auto');
-  const [presenterDisplayOptions, setPresenterDisplayOptions] =
-    useState<PresenterDisplayOption[]>(defaultPresenterDisplayOptions);
+  const [presenterDisplayOptions, setPresenterDisplayOptions] = useState<PresenterDisplayOption[]>(
+    defaultPresenterDisplayOptions,
+  );
   const [showTips, setShowTips] = useState<boolean>(true);
   const [recentFiles, setRecentFiles] = useState<string[]>([]);
   const [isRecentMenuOpen, setIsRecentMenuOpen] = useState<boolean>(false);
@@ -655,7 +350,9 @@ function App() {
     () => formatDuration(presenterElapsedSeconds),
     [presenterElapsedSeconds],
   );
-  const markdownFilePathForRender = isPresenterView ? presenterViewState.markdownFilePath : activeFilePath;
+  const markdownFilePathForRender = isPresenterView
+    ? presenterViewState.markdownFilePath
+    : activeFilePath;
   const markdownComponents = useMemo<Components>(
     () => ({
       img: ({ src, alt, ...props }) => {
@@ -673,20 +370,17 @@ function App() {
     [hasDesktopApi, markdownFilePathForRender],
   );
 
-  const rememberRecentFile = useCallback(
-    (filePath: string) => {
-      setRecentFiles((currentFiles) => {
-        const nextFiles = pushRecentFile(currentFiles, filePath);
+  const rememberRecentFile = useCallback((filePath: string) => {
+    setRecentFiles((currentFiles) => {
+      const nextFiles = pushRecentFile(currentFiles, filePath);
 
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(RECENT_FILES_STORAGE_KEY, JSON.stringify(nextFiles));
-        }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(RECENT_FILES_STORAGE_KEY, JSON.stringify(nextFiles));
+      }
 
-        return nextFiles;
-      });
-    },
-    [],
-  );
+      return nextFiles;
+    });
+  }, []);
 
   const forgetRecentFile = useCallback((filePath: string) => {
     setRecentFiles((currentFiles) => {
@@ -1101,37 +795,40 @@ function App() {
     [confirmDiscardUnsavedChanges, forgetRecentFile, hasDesktopApi, rememberRecentFile],
   );
 
-  const insertTextAtCursor = useCallback((text: string, revealInsertedSlide = false) => {
-    const editor = editorTextareaRef.current;
+  const insertTextAtCursor = useCallback(
+    (text: string, revealInsertedSlide = false) => {
+      const editor = editorTextareaRef.current;
 
-    if (!editor) {
-      const nextMarkdown = `${markdown}\n${text}`;
+      if (!editor) {
+        const nextMarkdown = `${markdown}\n${text}`;
+        setMarkdown(nextMarkdown);
+
+        if (revealInsertedSlide) {
+          setActiveSlideIndex(splitSlides(nextMarkdown).length - 1);
+        }
+
+        return;
+      }
+
+      const start = editor.selectionStart;
+      const end = editor.selectionEnd;
+
+      const nextMarkdown = `${markdown.slice(0, start)}${text}${markdown.slice(end)}`;
+
       setMarkdown(nextMarkdown);
 
       if (revealInsertedSlide) {
-        setActiveSlideIndex(splitSlides(nextMarkdown).length - 1);
+        setActiveSlideIndex(getSlideIndexAtPosition(nextMarkdown, start + text.length));
       }
 
-      return;
-    }
-
-    const start = editor.selectionStart;
-    const end = editor.selectionEnd;
-
-    const nextMarkdown = `${markdown.slice(0, start)}${text}${markdown.slice(end)}`;
-
-    setMarkdown(nextMarkdown);
-
-    if (revealInsertedSlide) {
-      setActiveSlideIndex(getSlideIndexAtPosition(nextMarkdown, start + text.length));
-    }
-
-    window.requestAnimationFrame(() => {
-      editor.focus();
-      const nextCursor = start + text.length;
-      editor.setSelectionRange(nextCursor, nextCursor);
-    });
-  }, [markdown]);
+      window.requestAnimationFrame(() => {
+        editor.focus();
+        const nextCursor = start + text.length;
+        editor.setSelectionRange(nextCursor, nextCursor);
+      });
+    },
+    [markdown],
+  );
 
   const handleEditorFocus = useCallback(() => {
     if (hasSeenPasteHintRef.current || typeof window === 'undefined') {
@@ -1440,7 +1137,10 @@ function App() {
       setMarkdown(joinSlides(sourceSlides));
 
       setSlideNotes((currentNotes) => {
-        const paddedNotes = Array.from({ length: sourceSlides.length }, (_, index) => currentNotes[index] ?? '');
+        const paddedNotes = Array.from(
+          { length: sourceSlides.length },
+          (_, index) => currentNotes[index] ?? '',
+        );
         const [movedNote] = paddedNotes.splice(fromIndex, 1);
         paddedNotes.splice(toIndex, 0, movedNote ?? '');
         return paddedNotes;
@@ -1898,7 +1598,11 @@ function App() {
               </div>
             )}
           </div>
-          <button type="button" className="btn-presenter-window" onClick={() => void togglePresenterWindow()}>
+          <button
+            type="button"
+            className="btn-presenter-window"
+            onClick={() => void togglePresenterWindow()}
+          >
             {isPresenterWindowOpen ? 'Close Presenter' : 'Open Presenter'}
           </button>
           <button type="button" className="btn-present" onClick={toggleFocusPreview}>
@@ -1910,7 +1614,11 @@ function App() {
           <button type="button" className="btn-export" onClick={() => void exportSlidesToPdf()}>
             Export PDF
           </button>
-          <button type="button" className="btn-new-deck" onClick={() => createDeckFromTemplate(selectedDeckTemplateId)}>
+          <button
+            type="button"
+            className="btn-new-deck"
+            onClick={() => createDeckFromTemplate(selectedDeckTemplateId)}
+          >
             New Deck
           </button>
           <button type="button" className="btn-open" onClick={() => void openMarkdownFile()}>
@@ -1944,13 +1652,19 @@ function App() {
               <button type="button" className="editor-action" onClick={duplicateCurrentSlide}>
                 Duplicate
               </button>
-              <label htmlFor="template-select" className="template-control" title={selectedDeckTemplate.description}>
+              <label
+                htmlFor="template-select"
+                className="template-control"
+                title={selectedDeckTemplate.description}
+              >
                 Template
                 <select
                   id="template-select"
                   className="template-select"
                   value={selectedDeckTemplateId}
-                  onChange={(event) => setSelectedDeckTemplateId(event.target.value as DeckTemplateId)}
+                  onChange={(event) =>
+                    setSelectedDeckTemplateId(event.target.value as DeckTemplateId)
+                  }
                 >
                   {deckTemplates.map((template) => (
                     <option key={template.id} value={template.id}>
@@ -1959,10 +1673,18 @@ function App() {
                   ))}
                 </select>
               </label>
-              <button type="button" className="editor-action" onClick={() => insertTemplateSlide(selectedDeckTemplateId)}>
+              <button
+                type="button"
+                className="editor-action"
+                onClick={() => insertTemplateSlide(selectedDeckTemplateId)}
+              >
                 Insert Template
               </button>
-              <button type="button" className="editor-action" onClick={() => void importImageFromDevice()}>
+              <button
+                type="button"
+                className="editor-action"
+                onClick={() => void importImageFromDevice()}
+              >
                 Add Image
               </button>
               <button type="button" className="editor-action emphasis" onClick={polishCurrentSlide}>
@@ -2043,7 +1765,9 @@ function App() {
                 type="button"
                 key={`${slide.title}-${index}`}
                 className={`outline-chip${index === activeSlideIndex ? ' active' : ''}${
-                  dragOverIndex === index && dragFromIndexRef.current !== index ? ' drop-target' : ''
+                  dragOverIndex === index && dragFromIndexRef.current !== index
+                    ? ' drop-target'
+                    : ''
                 }`}
                 onClick={() => setActiveSlideIndex(index)}
                 draggable={slides.length > 1}
@@ -2085,7 +1809,9 @@ function App() {
           <section className="presenter-control-panel" aria-label="Presenter controls">
             <div className="presenter-control-line">
               <strong>Presenter</strong>
-              <span>{isPresenterWindowOpen ? 'Audience window live' : 'Audience window closed'}</span>
+              <span>
+                {isPresenterWindowOpen ? 'Audience window live' : 'Audience window closed'}
+              </span>
             </div>
             <div className="presenter-control-line presenter-display-line">
               <label htmlFor="presenter-display-select" className="presenter-display-label">
@@ -2185,8 +1911,9 @@ function App() {
       <footer className="statusbar">
         <span>{status}</span>
         <span>
-          {hasUnsavedChanges ? 'Unsaved' : 'Synced'} · {activeFilePath ?? 'Untitled.md'} · {slides.length} slides · {notesCount} notes · ~
-          {estimatedMinutes} min talk · Auto-save {activeFilePath ? 'file' : 'draft'}
+          {hasUnsavedChanges ? 'Unsaved' : 'Synced'} · {activeFilePath ?? 'Untitled.md'} ·{' '}
+          {slides.length} slides · {notesCount} notes · ~{estimatedMinutes} min talk · Auto-save{' '}
+          {activeFilePath ? 'file' : 'draft'}
         </span>
       </footer>
     </div>
