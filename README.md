@@ -71,5 +71,5 @@ Installer output is written to `release/`.
 ## Release Automation
 
 - `.github/workflows/ci.yml` runs checks on pushes and pull requests.
-- `.github/workflows/windows-exe-release.yml` builds and publishes the Windows installer for
-  `v*` tags or an explicit manual dispatch.
+- `.github/workflows/windows-exe-release.yml` publishes automatic prereleases after pushes to
+  `main`, and stable Windows installers for `v*` tags or an explicit manual dispatch.
